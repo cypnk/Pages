@@ -53,29 +53,6 @@ define( 'PATH_PATTERN', '@^/[\pL\pN_\s\.\-\/]{1,255}/?$@i' );
  **/
 
 /**
- *  Safely decode JSON to array
- *  
- *  @return array
- */
-function decode( string $data = '', int $depth = 10 ) : array {
-	if ( empty( $data ) ) {
-		return [];
-	}
-	$depth	= intRange( $depth, 1, 50 );
-	$out	= 
-	\json_decode( 
-		\utf8_encode( $data ), true, $depth, 
-		\JSON_BIGINT_AS_STRING
-	);
-	
-	if ( empty( $out ) || false === $out ) {
-		return [];
-	}
-	
-	return $out;
-}
-
-/**
  *  Path prefix slash (/) helper
  */
 function slashPath( string $path, bool $suffix = false ) : string {
