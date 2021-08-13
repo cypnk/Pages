@@ -84,8 +84,8 @@ function getURI() : string {
 	if ( isset( $uri ) ) {
 		return $uri;
 	}
-	$uri	= \strtr( $uri, [ '\\' => '/' ] );
-	$uri	= \trim( $_SERVER['REQUEST_URI'] ?? '', "/." );
+	$uri	= \strtr( $_SERVER['REQUEST_URI'] ?? '', [ '\\' => '/' ] );
+	$uri	= \trim( $uri, "/." );
 	return $uri;
 }
 
@@ -414,8 +414,8 @@ function sendContent( string $name, string $default = '' ) {
  *  @param int		$code	Error code, defaults to 404
  *  @param bool		$send	Send content, if true
  */
-function sendError( int $code, bool $send ) {
-	static $meg = [
+function sendError( int $code, bool $send = true ) {
+	static $msg = [
 		400 => 'Bad Request',
 		401 => 'Unauthorized',
 		403 => 'Forbidden',
