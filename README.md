@@ -77,7 +77,7 @@ server {
 
 ### OpenBSD's httpd(8) web server
 
-The following configuration can be used if Bare is installed as the "example.com" website (tested on OpenBSD 6.9).
+The following configuration can be used if Pages is installed as the "example.com" website (tested on OpenBSD 6.9).
 
 Edit **/etc/httpd.conf** to add a custom server setting file:
 ```
