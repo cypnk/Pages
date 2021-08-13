@@ -29,7 +29,8 @@ Configure your webserver to send all requests to *index.php*. This is very simil
 
 ### Nginx
 
-The Nginx web server supports URL rewriting and file filtering. The following is a simple configuration for a site named example.com.  
+The Nginx web server supports URL rewriting and file filtering. The following is a simple configuration for a site named example.com tested on Arch linux.  
+
 Note: The pound sign(#) denotes comments. The location of **nginx.config** will depend on your platform.
 ```
 server {
