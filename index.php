@@ -84,8 +84,8 @@ function getURI() : string {
 	if ( isset( $uri ) ) {
 		return $uri;
 	}
-	$uri	= \trim( $_SERVER['REQUEST_URI'] ?? '', "/." );
 	$uri	= \strtr( $uri, [ '\\' => '/' ] );
+	$uri	= \trim( $_SERVER['REQUEST_URI'] ?? '', "/." );
 	return $uri;
 }
 
