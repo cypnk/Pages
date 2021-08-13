@@ -46,7 +46,7 @@ define( 'CONTENT_CACHE_TTL',		7200 );
 define( 'FILE_CACHE_TTL',		604800 );
 
 // Path matching pattern (default max 255 characters)
-define( 'PATH_PATTERN', '@^/[\pL\pN_\s\.\-\/]{1,255}/?$@i' );
+define( 'PATH_PATTERN', '@[\pL_\-\d\.\s\\/]{1,255}/?@i' );
 
 /**
  *  Caution editing below
@@ -214,7 +214,7 @@ function detectMime( string $path ) : string {
  *  @param string	$path	Raw file location
  *  @return string
  */
-function genEtag( string $path ) : string {
+function genEtag( string $path ) : array {
 	static $tags		= [];
 	
 	if ( isset( $tags[$path] ) ) {
@@ -489,9 +489,9 @@ function contentFolder( string $root ) : array {
 /**
  *  Check if this is a whitelisted file extension
  *  
- *  @param string	$file	Full file path
+ *  @param SplFileInfo	$file	File info object
  */
-function isStatic( string $file ) : bool {
+function isStatic( $file ) : bool {
 	if ( $ext = $file->getExtension() ) {
 		return 
 		(
@@ -533,7 +533,7 @@ function contentPage( $dir, $page, $send ) {
 		if ( 0 == strcasecmp( $path, $page ) ) {
 			httpCode( 200 );
 			if ( $send ) {
-				if ( isStatic( $raw ) ) {
+				if ( isStatic( $file ) ) {
 					sendStaticContent( $raw );
 				} else {
 					sendContent( $raw );
