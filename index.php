@@ -30,6 +30,7 @@ HEADERS
 
 // Static file headers
 define( 'STATIC_HEADERS', <<<HEADERS
+	Accept-Ranges: bytes
 	X-Frame-Options: SAMEORIGIN
 	X-XSS-Protection: 1; mode=block
 	X-Content-Type-Options: nosniff
@@ -47,6 +48,12 @@ define( 'FILE_CACHE_TTL',		604800 );
 
 // Path matching pattern (default max 255 characters)
 define( 'PATH_PATTERN', '@[\pL_\-\d\.\s\\/]{1,255}/?@i' );
+
+// Streaming file chunks
+define( 'STREAM_CHUNK_SIZE',	4096 );
+
+// Maximum file size before streaming in chunks
+define( 'STREAM_CHUNK_LIMIT',	50000 );
 
 /**
  *  Caution editing below
@@ -117,6 +124,106 @@ function getProtocol( string $assume = 'HTTP/1.1' ) : string {
 	}
 	$pr = $_SERVER['SERVER_PROTOCOL'] ?? $assume;
 	return $pr;
+}
+
+/**
+ *  Get requested file range, return [-1] if range was invalid
+ *  
+ *  @return array
+ */
+function getFileRange() : array {
+	static $ranges;
+	if ( isset( $ranges ) ) {
+		return $ranges;
+	}
+	
+	$fr = $_SERVER['HTTP_RANGE'] ?? '';
+	if ( empty( $fr ) ) {
+		return [];
+	}
+	
+	// Range(s) too long 
+	if ( strlen( $fr ) > 180 ) {
+		return [-1];
+	}
+	
+	// Check multiple ranges, if given
+	$rg = \preg_match_all( 
+		'/bytes=(^$)|(?<start>\d+)?(\s+)?-(\s+)?(?<end>\d+)?/is',
+		$fr,
+		$m
+	);
+	
+	// Invalid range syntax?
+	if ( false === $rg ) {
+		return [-1];
+	}
+	
+	$starting	= $m['start'] ?? [];
+	$ending		= $m['end'] ?? [];
+	$sc		= count( $starting );
+	
+	// Too many or too few ranges or starting / ending mismatch
+	if ( $sc > 10 || $sc == 0 || $sc != count( $ending ) ) {
+		return [-1];
+	}
+	
+	\asort( $starting );
+	\asort( $ending );
+	$rx = [];
+	
+	// Format ranges
+	foreach ( $ending as $k => $v ) {
+		
+		// Specify 0 for starting if empty and -1 if end of file
+		$rx[$k] = [ 
+			empty( $starting[$k] ) ? 0 : \intval( $starting[$k] ), 
+			empty( $ending[$k] ) ? -1 : \intval( $ending[$k] )
+		];
+		
+		// If start is larger or same as ending and not EOF...
+		if ( $rx[$k][0] >= $rx[$k][1] && $rx[$k][1] != -1 ) {
+			return [-1];
+		}
+	}
+	
+	// Sort by lowest starting value
+	usort( $rx, function( $a, $b ) {
+		return $a[0] <=> $b[0];
+	} );
+	
+	// End of file range found if true
+	$eof = 0;
+	
+	// Check for overlapping/redundant ranges (preserves bandwidth)
+	foreach ( $rx as $k => $v ) {
+		// Nothing to check yet
+		if ( !isset( $rx[$k-1] ) ) {
+			continue;
+		}
+		// Starting range is lower than or equal previous start
+		if ( $rx[$k][0] <= $rx[$k-1][0] ) {
+			return [-1];
+		}
+		
+		// Ending range lower than previous ending range
+		if ( $rx[$k][1] <= $rx[$k-1][1] ) {
+			// Special case EOF and it hasn't been found yet
+			if ( $rx[$k][1] == -1 && $eof == 0) {
+				$eof = 1;
+				continue;
+			}
+			return [-1];
+		}
+		
+		// Duplicate EOF ranges
+		if ( $rx[$k][1] == -1 && $eof == 1 ) {
+			return [-1];
+		}
+	}
+	
+	$ranges = $rx;
+	return $rx;
 }
 
 /**
@@ -265,6 +372,56 @@ function ifModified( string $etag ) : bool {
 }
 
 /**
+ *  Stream content in chunks within starting and ending limits
+ *  
+ *  @param resource	$stream		Open file stream
+ *  @param int		$int		Starting offset
+ *  @param int		$end		Ending offset or end of file
+ */
+function streamChunks( &$stream, int $start, int $end ) {
+	// Default chunk size
+	$csize	= \STREAM_CHUNK_SIZE;
+	$sent	= 0;
+	$tset	= false;
+	
+	fseek( $stream, $start );
+	
+	while ( !feof( $stream ) ) {
+		if ( !$tset ) {
+			// Turn off limit while streaming
+			\set_time_limit( 0 );
+			$tset = true;
+		}
+		
+		if ( $sent >= $end ) {
+			\set_time_limit( 30 );
+			break;
+		}
+		
+		// Check for aborted connection between flushes
+		if ( \connection_aborted() ) {
+			\set_time_limit( 30 );
+			fclose( $stream );
+			$stream = false;
+			die();
+		}
+		
+		// Change chunk size when approaching the end of range
+		if ( $sent + $csize > $end ) {
+			$csize = $end - $sent;
+		}
+		
+		$buf = fread( $stream, $csize );
+		echo $buf;
+		
+		$sent += strlen( $buf );
+		
+		ob_flush();
+		flush();
+	}
+}
+
+/**
  *  Set expires header
  */
 function setCacheExp( int $ttl ) {
@@ -340,6 +497,89 @@ function httpCode( int $code ) {
 }
 
 /**
+ *  Invalid file range error page helper
+ */
+function sendRangeError() {
+	httpCode( 416 );
+	die();
+}
+
+/**
+ *  Handle ranged file request
+ *  
+ *  @param string	$path		Absolute file path
+ *  @param bool		$dosend		Send file ranges if true
+ *  @return bool
+ */
+function sendFileRange( string $path, bool $dosend ) : bool {
+	$frange	= getFileRange();
+	$fsize	= filesize( $path );
+	$fend	= $fsize - 1;
+	$totals	= 0;
+	
+	// Check if any ranges are outside file limits
+	foreach ( $frange as $r ) {
+		if ( $r[0] >= $fend || $r[1] > $fend ) {
+			sendRangeError();
+		}
+		$totals += ( $r[1] > -1 ) ? 
+			( $r[1] - $r[0] ) + 1 : ( $fend - $r[0] ) + 1;
+	}
+	
+	if ( !$dosend ) {
+		return true;
+	}
+	
+	$stream	= fopen( $path, 'rb' );
+	if ( false === $stream ) {
+		// Error opening path
+		die();
+	}
+	
+	
+	// Prepare partial content
+	// Send static headers
+	$headers = trimmedList( \STATIC_HEADERS, false, "\n" );
+	foreach ( $headers as $h ) {
+		\header( $h, true );
+	}
+	
+	$mime	= detectMime( $path );
+	
+	// Generate boundary
+	$bound	= \base64_encode( \hash( 'sha1', $path . $fsize, true ) );
+	\header(
+		"Content-Type: multipart/byteranges; boundary={$bound}",
+		true
+	);
+	
+	\header( "Content-Length: {$totals}", true );
+	
+	// Send any headers and end buffering
+	\ob_end_flush();
+	
+	// Start fresh buffer
+	\ob_start();
+	
+	$limit = 0;
+	
+	foreach ( $frange as $r ) {
+		echo "\n--{$bound}";
+		echo "Content-Type: {$mime}";
+		if ( $r[1] == -1 ) {
+			echo "Content-Range: bytes {$r[0]}-{$fend}/{$fsize}\n";
+		} else {
+			echo "Content-Range: bytes {$r[0]}-{$r[1]}/{$fsize}\n";
+		}
+		
+		$limit = ( $r[1] > -1 ) ? $r[1] + 1 : $fsize;
+		streamChunks( $path, $r[0], $limit );
+	}
+	\ob_end_flush();
+	return true;
+}
+
+/**
  *  Send specific file including file type MIME
  *  
  *  @param string	$name		Exact filename to send
@@ -353,7 +593,16 @@ function sendStaticContent( string $name ) {
 	$tags	= genEtag( $name );
 	$fsize	= $tags['fsize'];
 	$etag	= $tags['etag'];
-	if ( false !== $tags['fsize'] ) {
+	$stream = false;
+	
+	if ( false !== $fsize ) {
+		// Prepare resource if this is a large file
+		if ( $fsize > \STREAM_CHUNK_LIMIT ) {
+			$stream = fopen( $path, 'rb' );
+			if ( false === $stream ) {
+				die();
+			}
+		}
 		\header( "Content-Length: {$fsize}", true );
 		if ( !empty( $etag ) ) {
 			\header( "ETag: {$etag}", true );
@@ -371,6 +620,11 @@ function sendStaticContent( string $name ) {
 	
 	// Only send file on etag difference
 	if ( ifModified( $etag ) ) {
+		if ( $stream !== false ) {
+			streamChunks( $stream, 0, $fsize );
+			fclose( $stream );
+			die();
+		}
 		\readfile( $name );
 	}
 	
@@ -531,14 +785,32 @@ function contentPage( $dir, $page, $send ) {
 		
 		// Matches requested path?
 		if ( 0 == strcasecmp( $path, $page ) ) {
-			httpCode( 200 );
-			if ( $send ) {
-				if ( isStatic( $file ) ) {
-					sendStaticContent( $raw );
+			if ( isStatic( $file ) ) {
+				// Check if ranged request
+				$frange	= getFileRange();
+				if ( empty( $frange ) ) {
+					// Full content
+					httpCode( 200 );
+					if ( $send ) {
+						sendStaticContent( $raw );
+					}
 				} else {
+					// Range wasn't satisfiable
+					if ( \in_array( -1, $frange ) ) {
+						sendRangeError();
+					}
+					
+					// Partial content
+					httpCode( 206 );
+					sendRangeFile( $raw, $send );
+				}
+			} else {
+				httpCode( 200 );
+				if ( $send ) {
 					sendContent( $raw );
 				}
 			}
+			die();
 		}
 	}
 }
