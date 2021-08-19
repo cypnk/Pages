@@ -598,7 +598,7 @@ function sendStaticContent( string $name ) {
 	if ( false !== $fsize ) {
 		// Prepare resource if this is a large file
 		if ( $fsize > \STREAM_CHUNK_LIMIT ) {
-			$stream = fopen( $path, 'rb' );
+			$stream = fopen( $name, 'rb' );
 			if ( false === $stream ) {
 				die();
 			}
