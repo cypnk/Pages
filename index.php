@@ -82,6 +82,110 @@ function trimmedList( string $text, bool $lower = false, string $sep = ',' ) : a
 }
 
 /**
+ *  Suhosin aware checking for function availability
+ *  
+ *  @param string	$func	Function name
+ *  @return bool		True If the function isn't available 
+ */
+function missing( $func ) : bool {
+	static $exts;
+	static $blocked;
+	static $fn	= [];
+	if ( isset( $fn[$func] ) ) {
+		return $fn[$func];
+	}
+	
+	if ( \extension_loaded( 'suhosin' ) ) {
+		if ( !isset( $exts ) ) {
+			$exts = \ini_get( 'suhosin.executor.func.blacklist' );
+		}
+		if ( !empty( $exts ) ) {
+			if ( !isset( $blocked ) ) {
+				$blocked = trimmedList( $exts, true );
+			}
+			
+			$search		= \strtolower( $func );
+			
+			$fn[$func]	= (
+				false	== \function_exists( $func ) && 
+				true	== \array_search( $search, $blocked ) 
+			);
+		}
+	} else {
+		$fn[$func] = !\function_exists( $func );
+	}
+	
+	return $fn[$func];
+}
+
+/**
+ *  Filtering and formatting
+ */
+
+/**
+ *  Apply uniform encoding of given text to UTF-8
+ *  
+ *  @param string	$text	Raw input
+ *  @param bool		$ignore Discard unconvertable characters (default)
+ *  @return string
+ */
+function utf( string $text, bool $ignore = true ) : string {
+	$out = $ignore ? 
+		\iconv( 'UTF-8', 'UTF-8//IGNORE', $text ) : 
+		\iconv( 'UTF-8', 'UTF-8', $text );
+	
+	return ( false === $out ) ? '' : $out;
+}
+
+/**
+ *  Strip unusable characters from raw text/html and conform to UTF-8
+ *  
+ *  @param string	$html	Raw content body to be cleaned
+ *  @param bool		$entities Convert to HTML entities
+ *  @return string
+ */
+function pacify( 
+	string		$html, 
+	bool		$entities	= false 
+) : string {
+	$html		= utf( \trim( $html ) );
+	
+	// Remove control chars except linebreaks/tabs etc...
+	$html		= 
+	\preg_replace(
+		'/[\x00-\x08\x0B\x0C\x0E-\x1F\x80-\x9F]/u', '', $html
+	);
+	
+	// Non-characters
+	$html		= 
+	\preg_replace(
+		'/[\x{fdd0}-\x{fdef}]/u', '', $html
+	);
+	
+	// UTF unassigned, formatting, and half surrogate pairs
+	$html		= 
+	\preg_replace(
+		'/[\p{Cs}\p{Cf}\p{Cn}]/u', '', $html
+	);
+		
+	// Convert Unicode character entities?
+	if ( $entities && !missing( 'mb_convert_encoding' ) ) {
+		$html	= 
+		\mb_convert_encoding( 
+			$html, 'HTML-ENTITIES', 'UTF-8' 
+		);
+	}
+	
+	return \trim( $html );
+}
+
+
+
+/**
+ *  Request handling
+ */
+
+/**
  *  Get full request URI
  *  
  *  @return string
@@ -92,7 +196,7 @@ function getURI() : string {
 		return $uri;
 	}
 	$uri	= \strtr( $_SERVER['REQUEST_URI'] ?? '', [ '\\' => '/' ] );
-	$uri	= \trim( $uri, "/." );
+	$uri	= pacify( \trim( $uri, "/." ) );
 	return $uri;
 }
 
@@ -304,7 +408,7 @@ function adjustMime( $mime, $path, $ext = null ) : string {
  *  @return string
  */
 function detectMime( string $path ) : string {
-	if ( \function_exists( 'mime_content_type' ) ) { 
+	if ( !missing( 'mime_content_type' ) ) { 
 		return adjustMime( \mime_content_type( $path ), $path );
 	}
 	
