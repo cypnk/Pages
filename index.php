@@ -24,7 +24,7 @@ define( 'COMMON_HEADERS', <<<HEADERS
 	X-Content-Type-Options: nosniff
 	Referrer-Policy: no-referrer, strict-origin-when-cross-origin
 	Permissions-Policy: accelerometer=(none), camera=(none), fullscreen=(self), geolocation=(none), gyroscope=(none), interest-cohort=(), payment=(none), usb=(none), microphone=(none), magnetometer=(none)
-	Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; font-src 'self'; style-src 'self'; script-src 'self'
+	Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; font-src 'self'; style-src 'self'; script-src 'self'; img-src 'self'
 HEADERS
 );
 
@@ -519,8 +519,9 @@ function streamChunks( &$stream, int $start, int $end ) {
 		echo $buf;
 		
 		$sent += strlen( $buf );
-		
-		ob_flush();
+		if ( ob_get_level() > 0 ) {
+			ob_flush();
+		}
 		flush();
 	}
 }
@@ -660,7 +661,9 @@ function sendFileRange( string $path, bool $dosend ) : bool {
 	\header( "Content-Length: {$totals}", true );
 	
 	// Send any headers and end buffering
-	\ob_end_flush();
+	if ( ob_get_level() > 0 ) {
+		\ob_end_flush();
+	}
 	
 	// Start fresh buffer
 	\ob_start();
@@ -720,7 +723,9 @@ function sendStaticContent( string $name ) {
 	}
 	
 	setCacheExp( \FILE_CACHE_TTL );
-	\ob_end_flush();
+	if ( ob_get_level() > 0 ) {
+		\ob_end_flush();
+	}
 	
 	// Only send file on etag difference
 	if ( ifModified( $etag ) ) {
@@ -758,7 +763,9 @@ function sendContent( string $name, string $default = '' ) {
 	}
 	
 	setCacheExp( \CONTENT_CACHE_TTL );
-	\ob_end_flush();
+	if ( ob_get_level() > 0 ) {
+		\ob_end_flush();
+	}
 	
 	\readfile( $name );
 	
