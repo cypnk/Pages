@@ -15,7 +15,7 @@ There are no databases, cookies, sessions etc... This is a simple handler for se
 
 ## Requirements
 * Webserver capable of handling URL rewrites (Apache, Nginx etc...)
-* PHP Version 7.3+ (may work on 7.2 and older, but not tested on these)
+* PHP Version 7.3+, 8.0+ recommended (may work on 7.2 and older, but not tested on these)
 * fileinfo Extension installed or enabled in **php.ini**
 
 ## Installation
