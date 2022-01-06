@@ -17,29 +17,6 @@ define( 'UPLOADS', \realpath( \dirname( __FILE__ ) ) . 'uploads/' );
 // Default HTML content type (leave as UTF-8 unless there's a good reason to change it)
 define( 'HTML_TYPE', 'Content-type: text/html; charset=UTF-8' );
 
-// Common HTML content headers (adjust as needed)
-define( 'COMMON_HEADERS', <<<HEADERS
-	X-Frame-Options: SAMEORIGIN
-	X-XSS-Protection: 1; mode=block
-	X-Content-Type-Options: nosniff
-	Referrer-Policy: no-referrer, strict-origin-when-cross-origin
-	Permissions-Policy: accelerometer=(none), camera=(none), fullscreen=(self), geolocation=(none), gyroscope=(none), interest-cohort=(), payment=(none), usb=(none), microphone=(none), magnetometer=(none)
-	Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; font-src 'self'; style-src 'self'; script-src 'self'; img-src 'self'
-HEADERS
-);
-
-// Static file headers
-define( 'STATIC_HEADERS', <<<HEADERS
-	Accept-Ranges: bytes
-	X-Frame-Options: SAMEORIGIN
-	X-XSS-Protection: 1; mode=block
-	X-Content-Type-Options: nosniff
-	Referrer-Policy: no-referrer, strict-origin-when-cross-origin
-	Permissions-Policy: interest-cohort=()
-	Content-Security-Policy: default-src 'self'; base-uri 'none'; frame-ancestors 'none'
-HEADERS
-);
-
 // Content cache expiration (7200 = 2 hours)
 define( 'CONTENT_CACHE_TTL',		7200 );
 
@@ -49,15 +26,107 @@ define( 'FILE_CACHE_TTL',		604800 );
 // Path matching pattern (default max 255 characters)
 define( 'PATH_PATTERN', '@[\pL_\-\d\.\s\\/]{1,255}/?@i' );
 
+// Whitelist of approved frame sources for frame-ancestors policy (one per line)
+define( 'FRAME_WHITELIST',	<<<LINES
+
+LINES
+);
+
+// Content Security and Permissions Policy headers
+define( 'SECPOLICY',	<<<JSON
+{
+	"content-security-policy": {
+		"default-src"			: "'none'",
+		"img-src"			: "*",
+		"base-uri"			: "'self'",
+		"style-src"			: "'self'",
+		"script-src"			: "'self'",
+		"font-src"			: "'self'",
+		"form-action"			: "'self'",
+		"frame-ancestors"		: "'self'",
+		"frame-src"			: "*",
+		"media-src"			: "'self'",
+		"connect-src"			: "'self'",
+		"worker-src"			: "'self'",
+		"child-src"			: "'self'",
+		"require-trusted-types-for"	: "'script'"
+	},
+	"permissions-policy": {
+		"accelerometer"			: [ "none" ],
+		"camera"			: [ "none" ],
+		"fullscreen"			: [ "self" ],
+		"geolocation"			: [ "none" ],
+		"gyroscope"			: [ "none" ],
+		"interest-cohort"		: [],
+		"payment"			: [ "none" ],
+		"usb"				: [ "none" ],
+		"microphone"			: [ "none" ],
+		"magnetometer"			: [ "none" ]
+	}, 
+	"common-policy": [
+		"X-XSS-Protection: 1; mode=block",
+		"X-Content-Type-Options: nosniff",
+		"X-Frame-Options: SAMEORIGIN",
+		"Referrer-Policy: no-referrer, strict-origin-when-cross-origin"
+	]
+}
+JSON
+);
+
 // Streaming file chunks
 define( 'STREAM_CHUNK_SIZE',	4096 );
 
 // Maximum file size before streaming in chunks
 define( 'STREAM_CHUNK_LIMIT',	50000 );
 
-/**
+
+/***********************************************************
  *  Caution editing below
+ ***********************************************************/
+
+
+
+/**
+ *  Helpers
  **/
+
+/**
+ *  Filter number within min and max range, inclusive
+ *  
+ *  @param mixed	$val		Given default value
+ *  @param int		$min		Minimum, returned if less than this
+ *  @param int		$max		Maximum, returned if greater than this
+ *  @return int
+ */
+function intRange( $val, int $min, int $max ) : int {
+	$out = ( int ) $val;
+	
+	return 
+	( $out > $max ) ? $max : ( ( $out < $min ) ? $min : $out );
+}
+
+/**
+ *  Safely decode JSON to array
+ *  
+ *  @return array
+ */
+function decode( string $data = '', int $depth = 10 ) : array {
+	if ( empty( $data ) ) {
+		return [];
+	}
+	$depth	= intRange( $depth, 1, 50 );
+	$out	= 
+	\json_decode( 
+		\utf8_encode( $data ), true, $depth, 
+		\JSON_BIGINT_AS_STRING
+	);
+	
+	if ( empty( $out ) || false === $out ) {
+		return [];
+	}
+	
+	return $out;
+}
 
 /**
  *  Path prefix slash (/) helper
@@ -66,6 +135,59 @@ function slashPath( string $path, bool $suffix = false ) : string {
 	return $suffix ?
 		\rtrim( $path, '/\\' ) . '/' : 
 		'/'. \ltrim( $path, '/\\' );
+}
+
+/**
+ *  Split a block of text into an array of lines
+ *  
+ *  @param string	$text	Raw text to split into lines
+ *  @param int		$lim	Max line limit, defaults to unlimited
+ *  @param bool		$tr	Also trim lines if true
+ *  @return array
+ */
+function lines( string $text, int $lim = -1, bool $tr = true ) : array {
+	return $tr ?
+	\preg_split( 
+		'/\s*\R\s*/', 
+		trim( $text ), 
+		$lim, 
+		\PREG_SPLIT_NO_EMPTY 
+	) : 
+	\preg_split( '/\R/', $text, $lim, \PREG_SPLIT_NO_EMPTY );
+}
+
+/**
+ *  Helper to turn items (one per line) into a unique value array
+ *  
+ *  @param string	$text	Lined settings (one per line)
+ *  @param int		$lim	Maximum number of items
+ *  @param string	$filter	Optional filter name to apply
+ *  @return array
+ */
+function lineSettings( string $text, int $lim, string $filter = '' ) : array {
+	$ln = \array_unique( lines( $text ) );
+	
+	$rt = ( ( count( $ln ) > $lim ) && $lim > -1 ) ? 
+		\array_slice( $ln, 0, $lim ) : $ln;
+	
+	return 
+	( !empty( $filter ) && \is_callable( $filter ) ) ? 
+		\array_map( $filter, $rt ) : $rt;
+}
+
+/**
+ *  Format configuration setting as a set of lines or an array and returns filtered
+ *  
+ *  @param mixed	$def	Default value
+ *  @param string	$map	Filter function
+ */
+function linedConfig( $def, string $filter ) {
+	$raw = 
+	\is_array( $def ) ? 
+		\array_map( $filter, $def ) : 
+		lineSettings( $def, -1, $filter );
+	
+	return \array_unique( \array_filter( $raw ) );
 }
 
 /**
@@ -179,6 +301,239 @@ function pacify(
 	return \trim( $html );
 }
 
+
+/**
+ *  HTML safe character entities in UTF-8
+ *  
+ *  @param string	$v	Raw text to turn to HTML entities
+ *  @param bool		$quotes	Convert quotes (defaults to true)
+ *  @param bool		$spaces	Convert spaces to "&nbsp;*" (defaults to true)
+ *  @return string
+ */
+function entities( 
+	string		$v, 
+	bool		$quotes	= true,
+	bool		$spaces	= true
+) : string {
+	if ( $quotes ) {
+		$v	=
+		\htmlentities( 
+			utf( $v, false ), 
+			\ENT_QUOTES | \ENT_SUBSTITUTE, 
+			'UTF-8'
+		);
+	} else {
+		$v =  \htmlentities( 
+			utf( $v, false ), 
+			\ENT_NOQUOTES | \ENT_SUBSTITUTE, 
+			'UTF-8'
+		);
+	}
+	if ( $spaces ) {
+		return 
+		\strtr( $v, [ 
+			' ' => '&nbsp;',
+			'	' => '&nbsp;&nbsp;&nbsp;&nbsp;'
+		] );
+	}
+	return $v;
+}
+
+/**
+ *  Filter URL
+ *  This is not a 100% foolproof method, but it's better than nothing
+ *  
+ *  @param string	$txt	Raw URL attribute value
+ *  @param bool		$xss	Filter XSS possibilities
+ *  @return string
+ */
+function cleanUrl( 
+	string		$txt, 
+	bool		$xss		= true
+) : string {
+	// Nothing to clean
+	if ( empty( $txt ) ) {
+		return '';
+	}
+	
+	// Default filter
+	if ( \filter_var( $txt, \FILTER_VALIDATE_URL ) ) {
+		// XSS filter
+		if ( $xss ) {
+			if ( !\preg_match( 
+				'~^(http|ftp)(s)?\:\/\/((([\pL\pN\-]{1,25})(\.)?){2,9})($|\/.*$){4,255}$~i', 
+				$txt 
+			) ){
+				return '';
+			}	
+		}
+		
+		if ( 
+			\preg_match( '/(<(s(?:cript|tyle)).*?)/ism', $txt ) || 
+			\preg_match( '/(document\.|window\.|eval\(|\(\))/ism', $txt ) || 
+			\preg_match( '/(\\~\/|\.\.|\\\\|\-\-)/sm', $txt ) 
+		) {
+			return '';
+		}
+		
+		// Return as/is
+		return  $txt;
+	}
+	
+	return entities( $txt, false, false );
+}
+
+/**
+ *  Convert all spaces to single character
+ *  
+ *  @param string	$text		Raw text containting mixed space types
+ *  @param string	$rpl		Replacement space, defaults to ' '
+ *  @param string	$br		Preserve line breaks
+ *  @return string
+ */
+function unifySpaces( string $text, string $rpl = ' ', bool $br = false ) : string {
+	return $br ?
+		\preg_replace( 
+			'/[ \t\v\f]+/', $rpl, pacify( $text ) 
+		) : 
+		\preg_replace( '/[[:space:]]+/', $rpl, pacify( $text ) );
+}
+
+/**
+ *  Make text completely bland by stripping punctuation, 
+ *  spaces and diacritics (for further processing)
+ *  
+ *  @param string	$text		Raw input text
+ *  @param bool		$nospecial	Remove special characters if true
+ *  @return string
+ */
+function bland( string $text, bool $nospecial = false ) : string {
+	$text = \strip_tags( unifySpaces( $text ) );
+	
+	if ( $nospecial ) {
+		return \preg_replace( 
+			'/[^\p{L}\p{N}\-\s_]+/', '', \trim( $text ) 
+		);
+	}
+	return \trim( $text );
+}
+
+/**
+ *  Configuration handling
+ */
+
+/**
+ *  Quoted security policy attribute helper
+ *   
+ *  @param string	$atr	Security policy parameter
+ *  @return string
+ */
+function quoteSecAttr( string $atr ) : string {
+	// Safe allow list
+	static $allow	= [ 'self', 'src', 'none' ];
+	$atr		= \trim( unifySpaces( $atr ) );
+	
+	return 
+	\in_array( $atr, $allow ) ? 
+		$atr : '"' . cleanUrl( $atr ) . '"'; 
+}
+
+/**
+ *  Parse security policy attribute value
+ *  
+ *  @param string	$key	Permisisons policy identifier
+ *  @param mixed	$policy	Policy value(s)
+ *  @return string
+ */
+function parsePermPolicy( string $key, $policy = null ) : string {
+	// No value? Send empty set E.G. "interest-cohort=()"
+	if ( empty( $policy ) ) {
+		return bland( $key, true ) . '=()';
+	}
+	
+	// Send specific value(s) E.G. "fullscreen=(self)"
+	return 
+	bland( $key, true ) . '=(' . 
+	( \is_array( $policy ) ? 
+		\implode( ' ', \array_map( 'quoteSecAttr', $policy ) ) : 
+		quoteSecAttr( ( string ) $policy ) ) . 
+	')';
+}
+
+/**
+ *  Content Security and Permissions Policy settings
+ *  
+ *  @param string	$policy		Security policy header
+ *  @return string
+ */
+function securityPolicy( string $policy ) : string {
+	static $p;
+	static $r	= [];
+	
+	// Load defaults
+	if ( !isset( $p ) ) {
+		$p = decode( \SECPOLICY );
+	}
+	
+	switch ( $policy ) {
+		case 'common':
+		case 'common-policy':
+			if ( isset( $r['common'] ) ) {
+				return $r['common'];
+			}
+			
+			// Common header override
+			$cfj = 
+			linedConfig( 
+				$p['common-policy'] ?? [], 
+				'bland' 
+			);
+			$r['common'] = \implode( "\n", $cfj );
+			
+			return $r['common'];
+			
+		case 'permissions':
+		case 'permissions-policy':
+			if ( isset( $r['permissions'] ) ) {
+				return $r['permissions'];
+			}
+			
+			$prm = [];
+			$def = $p['permissions-policy'] ?? [];
+			foreach ( $def as $k => $v ) {
+				$prm[]	= parsePermPolicy( $k, $v );
+			}
+			
+			$r['permissions'] = \implode( ', ', $prm );
+			return $r['permissions'];
+			
+		case 'content-security':
+		case 'content-security-policy':
+			if ( isset( $r['content'] ) ) {
+				return $r['content'];
+			}
+			$csp = '';
+			$cjp = $p['content-security-policy'] ?? [];
+			
+			// Approved frame ancestors ( for embedding media )
+			$frm = 
+			\implode( ' ', 
+				linedConfig( 
+					\FRAME_WHITELIST, 
+					'cleanUrl' 
+				) 
+			);
+			
+			// Append sources to frame-ancestors policy setting
+			foreach ( $cjp as $k => $v ) {
+				$csp .= 
+				( 0 == \strcmp( $k, 'frame-ancestors' ) ) ? 
+					"$k $v $frm;" : "$k $v;";
+			}
+			$r['content'] = \rtrim( $csp, ';' );
+			return $r['content'];
+	}
+}
 
 
 /**
@@ -519,10 +874,7 @@ function streamChunks( &$stream, int $start, int $end ) {
 		echo $buf;
 		
 		$sent += strlen( $buf );
-		if ( ob_get_level() > 0 ) {
-			ob_flush();
-		}
-		flush();
+		flushOutput();
 	}
 }
 
@@ -534,6 +886,51 @@ function setCacheExp( int $ttl ) {
 	\header( 'Expires: ' . 
 		\gmdate( 'D, d M Y H:i:s', time() + $ttl ) . 
 		' GMT', true );
+}
+
+/**
+ *  Safety headers
+ *  
+ *  @param string	$chk	Content checksum
+ *  @param bool		$send	CSP Send Content Security Policy header
+ *  @param bool		$type	Send content type (html)
+ */
+function preamble(
+	string	$chk		= '', 
+	bool	$send_csp	= true,
+	bool	$send_type	= true
+) {
+	if ( $send_type ) {
+		\header( HTML_TYPE, true );
+	}
+	
+	// Set common policy headers
+	$chead	= explode( "\n", securityPolicy( 'common-policy' ) );
+	foreach ( $chead as $h ) {
+		\header( $h, true );
+	}
+	
+	// Set default permissions policy header
+	$perms = securityPolicy( 'permissions-policy' );
+	if ( !empty( $perms ) ) {
+		\header( 'Permissions-Policy: ' . $perms , true );
+	}
+	
+	// If sending CSP and content checksum isn't used
+	if ( $send_csp ) {
+		$csp = securityPolicy( 'content-security-policy' );
+		if ( !empty( $csp ) ) {
+			\header( 'Content-Security-Policy: ' . $csp, true );
+		}
+	
+	// Content checksum used
+	} elseif ( !empty( $chk ) ) {
+		\header( 
+			"Content-Security-Policy: default-src " .
+			"'self' '{$chk}'", 
+			true
+		);
+	}
 }
 
 /**
@@ -610,6 +1007,24 @@ function sendRangeError() {
 }
 
 /**
+ *  Flush and optionally end output buffers
+ *  
+ *  @param bool		$ebuf		End buffers
+ */
+function flushOutput( bool $ebuf = false ) {
+	if ( $ebuf ) {
+		while ( \ob_get_level() > 0 ) {
+			\ob_end_flush();
+		}
+	} else {
+		while ( \ob_get_level() > 0 ) {
+			\ob_flush();	
+		}
+	}
+	flush();
+}
+
+/**
  *  Handle ranged file request
  *  
  *  @param string	$path		Absolute file path
@@ -644,10 +1059,7 @@ function sendFileRange( string $path, bool $dosend ) : bool {
 	
 	// Prepare partial content
 	// Send static headers
-	$headers = trimmedList( \STATIC_HEADERS, false, "\n" );
-	foreach ( $headers as $h ) {
-		\header( $h, true );
-	}
+	preamble( '', true, false );
 	
 	$mime	= detectMime( $path );
 	
@@ -661,9 +1073,7 @@ function sendFileRange( string $path, bool $dosend ) : bool {
 	\header( "Content-Length: {$totals}", true );
 	
 	// Send any headers and end buffering
-	if ( ob_get_level() > 0 ) {
-		\ob_end_flush();
-	}
+	flushOutput( true );
 	
 	// Start fresh buffer
 	\ob_start();
@@ -682,7 +1092,7 @@ function sendFileRange( string $path, bool $dosend ) : bool {
 		$limit = ( $r[1] > -1 ) ? $r[1] + 1 : $fsize;
 		streamChunks( $path, $r[0], $limit );
 	}
-	\ob_end_flush();
+	flushOutput( true );
 	return true;
 }
 
@@ -717,15 +1127,10 @@ function sendStaticContent( string $name ) {
 	}
 	
 	// Send static headers
-	$headers = trimmedList( \STATIC_HEADERS, false, "\n" );
-	foreach ( $headers as $h ) {
-		\header( $h, true );
-	}
+	preamble( '', true, false );
 	
 	setCacheExp( \FILE_CACHE_TTL );
-	if ( ob_get_level() > 0 ) {
-		\ob_end_flush();
-	}
+	flushOutput( true );
 	
 	// Only send file on etag difference
 	if ( ifModified( $etag ) ) {
@@ -750,22 +1155,15 @@ function sendStaticContent( string $name ) {
 function sendContent( string $name, string $default = '' ) {
 	if ( !\file_exists( $name ) ) {
 		// Nothing to send
+		preamble( '', true, false );
 		die( $default );
 	}
 	
-	// Send content header
-	\header( \HTML_TYPE, true );
-	
 	// Send common headers
-	$headers = trimmedList( \COMMON_HEADERS, false, "\n" );
-	foreach ( $headers as $h ) {
-		\header( $h, true );
-	}
+	preamble();
 	
 	setCacheExp( \CONTENT_CACHE_TTL );
-	if ( ob_get_level() > 0 ) {
-		\ob_end_flush();
-	}
+	flushOutput( true );
 	
 	\readfile( $name );
 	
