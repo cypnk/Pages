@@ -862,7 +862,7 @@ function streamChunks( &$stream, int $start, int $end ) {
 			\set_time_limit( 30 );
 			fclose( $stream );
 			$stream = false;
-			die();
+			visitorAbort();
 		}
 		
 		// Change chunk size when approaching the end of range
@@ -1007,6 +1007,24 @@ function sendRangeError() {
 }
 
 /**
+ *  Clean the output buffer without flushing
+ *  
+ *  @param bool		$ebuf		End buffers
+ */
+function cleanOutput( bool $ebuf = false ) {
+	if ( $ebuf ) {
+		while ( \ob_get_level() > 0 ) {
+			\ob_end_clean();
+		}
+		return;	
+	}
+	
+	while ( \ob_get_level() && \ob_get_length() > 0 ) {
+		\ob_clean();
+	}
+}
+
+/**
  *  Flush and optionally end output buffers
  *  
  *  @param bool		$ebuf		End buffers
@@ -1022,6 +1040,17 @@ function flushOutput( bool $ebuf = false ) {
 		}
 	}
 	flush();
+}
+
+/**
+ *  Visitor disconnect event helper
+ */
+function visitorAbort() {
+	cleanOutput( true );
+	if ( !\headers_sent() ) {
+		httpCode( 205 );
+	}
+	die();
 }
 
 /**
