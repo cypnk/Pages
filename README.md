@@ -1,7 +1,7 @@
 # Pages
 A single file request handler
 
-This is a directory content helper that builds on [Placeholder](https://github.com/cypnk/Placeholder), which allows for more than one page to be served with minimal intervention. Content is added to the /content folder, which also includes the default error files. Other static files such as images and JS are added to the /uploads folder. When a visitor reaches example.com/page, if page.html exists in the /content folder, it will be served. If *style.css* exists in the /uploads folder, it will also be served. Subfolders are supported in a similar manner. Add an *index.html* when creating a subfolder if you like.
+This is a directory content helper that builds on [Placeholder](https://github.com/cypnk/Placeholder), which allows for more than one page to be served with minimal intervention. Content is added to the /content folder, which also includes the default error files. Other static files such as images and JS are added to the /uploads folder. When a visitor reaches example.com/page, if page.html exists in the /content folder, it will be served. If *style.css* exists in the /uploads folder, and it's referenced in page.html, it will also be served. Subfolders are supported in a similar manner. Add an *index.html* when creating a subfolder if you like.
 
 The default URL limit is 255 charcters, however this can be extended in *index.php*.
 
@@ -78,7 +78,7 @@ server {
 
 ### OpenBSD's httpd(8) web server
 
-The following configuration can be used if Pages is installed as the "example.com" website (tested on OpenBSD 6.9).
+The following configuration can be used if Pages is installed as the "example.com" website (tested on OpenBSD 7.0).
 
 Edit **/etc/httpd.conf** to add a custom server setting file:
 ```
