@@ -1358,7 +1358,7 @@ function contentPage( $dir, $page, $send ) {
 					
 					// Partial content
 					httpCode( 206 );
-					sendRangeFile( $raw, $send );
+					sendFileRange( $raw, $send );
 				}
 			} else {
 				httpCode( 200 );
