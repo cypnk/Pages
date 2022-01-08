@@ -13,6 +13,21 @@ define( 'UPLOADS', \realpath( \dirname( __FILE__ ) ) . 'uploads/' );
 // Use this instead if you keep uploaded files outside the web root
 // define( 'UPLOADS',	\realpath( \dirname( __FILE__, 2 ) ) . '/uploads/' );
 
+// Maximum folder depth
+define( 'MAX_DEPTH',			50 );
+
+// Media types which will be served (comma separated list)
+define( 'MEDIA_TYPES',			<<<TYPES
+css, js, txt, html, vtt,
+ico, jpg, jpeg, gif, bmp, png, tif, tiff, svg, webp,
+ttf, otf, woff, woff2,
+doc, docx, ppt, pptx, pdf, epub,
+ogg, oga, mpa, mp3, m4a, wav, wma, flac,
+avi, mp4, mkv, mov, ogg, ogv,
+zip, rar, gz, tar
+
+TYPES
+);
 
 // Default HTML content type (leave as UTF-8 unless there's a good reason to change it)
 define( 'HTML_TYPE', 'Content-type: text/html; charset=UTF-8' );
@@ -1211,7 +1226,10 @@ function sendError( int $code, bool $send = true ) {
 		400 => 'Bad Request',
 		401 => 'Unauthorized',
 		403 => 'Forbidden',
-		410 => 'Gone'
+		405 => 'Method Not Allowed',
+		410 => 'Gone',
+		414 => 'URI Too Long',
+		415 => 'Unsupported Media Type'
 	];
 	
 	if ( \array_key_exists( $code, $msg ) ) {
@@ -1354,12 +1372,47 @@ function contentPage( $dir, $page, $send ) {
 }
 
 /**
+ *  Restrict handling to given path constraints
+ *  
+ *  @param string	$path	Visitor requested URI
+ *  @param bool		$send	Send content if found when true
+ */
+function pathLimits( string $path, bool $send ) {
+	if ( empty( $path ) ) {
+		return;
+	}
+	
+	// Limit to maximum folder depth
+	$depth	= intRange( \MAX_DEPTH, 1, 500 );
+	if ( count( \explode( '/', $path ) ) > $depth ) {
+		sendError( 414, $send );
+	}
+	
+	$ext	= 
+	\pathinfo( $path, \PATHINFO_EXTENSION ) ?? '';
+	
+	// No type to check?
+	if ( empty( $ext ) ) {
+		return;
+	}
+	
+	$wext	= trimmedList( \MEDIA_TYPES, true );
+	if ( \in_array( \strtolower( $ext ), $wext ) ) {
+		return;
+	}
+	
+	// Not an allowed media type
+	sendError( 415, $send );
+}
+
+/**
  *  Main URI content handler
  *  
  *  @param bool		$send	Send content if found when true
  */
 function getContent( bool $send ) {
 	$path	= getURI();
+	pathLimits( $path, $send );
 	
 	// Send homepage if no path specified
 	if ( empty( $path ) ) {
@@ -1403,7 +1456,7 @@ function getOptions() {
  */
 function scrubOutput() {
 	// Scrub output buffer
-	\ob_clean();
+	cleanOutput();
 	\header_remove( 'Pragma' );
 	
 	// This is best done in php.ini : expose_php = Off
@@ -1435,7 +1488,6 @@ switch ( getMethod() ) {
 		
 	// Send allowed methods header for everything else
 	default:
-		httpCode( 405 );
-		die();
+		sendError( 405 );
 }
 
