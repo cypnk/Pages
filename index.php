@@ -856,34 +856,31 @@ function streamChunks( &$stream, int $start, int $end ) {
 	// Default chunk size
 	$csize	= \STREAM_CHUNK_SIZE;
 	$sent	= 0;
-	$tset	= false;
 	
 	fseek( $stream, $start );
 	
 	while ( !feof( $stream ) ) {
-		if ( !$tset ) {
-			// Turn off limit while streaming
-			\set_time_limit( 0 );
-			$tset = true;
-		}
-		
-		if ( $sent >= $end ) {
-			\set_time_limit( 30 );
-			break;
-		}
 		
 		// Check for aborted connection between flushes
 		if ( \connection_aborted() ) {
-			\set_time_limit( 30 );
 			fclose( $stream );
 			$stream = false;
 			visitorAbort();
 		}
 		
+		// End reached
+		if ( $sent >= $end ) {
+			flushOutput();
+			break;
+		}
+		
 		// Change chunk size when approaching the end of range
 		if ( $sent + $csize > $end ) {
-			$csize = $end - $sent;
+			$csize = ( $end + 1 ) - $sent;
 		}
+		
+		// Reset limit while streaming
+		\set_time_limit( 30 );
 		
 		$buf = fread( $stream, $csize );
 		echo $buf;
@@ -1099,7 +1096,7 @@ function sendFileRange( string $path, bool $dosend ) : bool {
 		// Error opening path
 		die();
 	}
-	
+	\stream_set_blocking( $stream, false );
 	
 	// Prepare partial content
 	// Send static headers
@@ -1134,8 +1131,9 @@ function sendFileRange( string $path, bool $dosend ) : bool {
 		}
 		
 		$limit = ( $r[1] > -1 ) ? $r[1] + 1 : $fsize;
-		streamChunks( $path, $r[0], $limit );
+		streamChunks( $stream, $r[0], $limit );
 	}
+	fclose( $stream );
 	flushOutput( true );
 	return true;
 }
@@ -1163,6 +1161,7 @@ function sendStaticContent( string $name ) {
 			if ( false === $stream ) {
 				die();
 			}
+			\stream_set_blocking( $stream, false );
 		}
 		\header( "Content-Length: {$fsize}", true );
 		if ( !empty( $etag ) ) {
