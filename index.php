@@ -735,57 +735,45 @@ function filterDir( $path, string $root ) {
 }
 
 /**
- *  Adjust text mime-type based on path extension
- *  
- *  @param mixed	$mime		Discovered mime-type
- *  @param string	$path		File name or path name
- *  @param mixed	$ext		Given extension (optional)
- *  @return string Adjusted mime type
- */
-function adjustMime( $mime, $path, $ext = null ) : string {
-	if ( false === $mime ) {
-		return 'application/octet-stream';
-	}
-	
-	// Override text types with special extensions
-	// Required on some OSes like OpenBSD
-	if ( 0 === \strcasecmp( $mime, 'text/plain' ) ) {
-		$e	= 
-		$ext ?? \pathinfo( $path, \PATHINFO_EXTENSION ) ?? '';
-		
-		switch( \strtolower( $e ) ) {
-			case 'css':
-				return 'text/css';
-				
-			case 'js':
-				return 'text/javascript';
-				
-			case 'svg':
-				return 'image/svg+xml';
-				
-			case 'vtt':
-				return 'text/vtt';
-		}
-	}
-	
-	return \strtolower( $mime );
-}
-
-/**
  *  File mime-type detection helper
  *  
  *  @param string	$path	Fixed file path
  *  @return string
  */
 function detectMime( string $path ) : string {
-	if ( !missing( 'mime_content_type' ) ) { 
-		return adjustMime( \mime_content_type( $path ), $path );
+	$ext = \pathinfo( $path, \PATHINFO_EXTENSION ) ?? '';
+		
+	// Simpler text types
+	switch( \strtolower( $ext ) ) {
+		case 'txt':
+			return 'text/plain';
+			
+		case 'css':
+			return 'text/css';
+			
+		case 'js':
+			return 'text/javascript';
+			
+		case 'svg':
+			return 'image/svg+xml';
+			
+		case 'vtt':
+			return 'text/vtt';
 	}
 	
-	$info	= \finfo_open( \FILEINFO_MIME_TYPE );
-	$mime	= adjustMime( \finfo_open( $info, $path ), $path );
+	// Detect others
+	if ( missing( 'mime_content_type' ) ) {
+		$info	= \finfo_open( \FILEINFO_MIME_TYPE );
+		$mime	= \finfo_open( $info, $path );
+		\finfo_close( $info );
+	} else {
+		$mime = \mime_content_type( $path );
+	}
 	
-	\finfo_close( $info );
+	if ( false === $mime ) {
+		return 'application/octet-stream';
+	}
+	
 	return $mime;
 }
 
